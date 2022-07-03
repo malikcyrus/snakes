@@ -202,9 +202,250 @@ void add_fruit(){
  * @param d Direction the snake was moving in 
  */
 void consume_fruit(snake* s, direction d){
+    // move snake 
+    memmove(&(s->body[1]), &(s->body[0]), 
+            (s->length-2) * sizeof(coordinate));
 
+    // set properties 
+    s->body[0].y = s->head.y; 
+    s->body[0].x = s->head.x; 
+    s->body[0].d = s->head.d; 
+
+    // move snake in direction 
+     switch(d){
+        case UP:{
+            s->head.y = s->head.y-1; 
+            s->head.d = UP; 
+            if(arena[s->head.y][s->head.x + 1] == FRUIT){
+                pthread_mutex_lock(&arena_lock); // locking the thread 
+                arena[s->head.y][s->head.x + 1] = 0; 
+                pthread_mutex_unlock(&arena_lock);
+            }
+            break;
+        }
+        case DOWN:{
+            s->head.y = s->head.y+1; 
+            s->head.d = DOWN; 
+            if(arena[s->head.y][s->head.x + 1] == FRUIT){
+                pthread_mutex_lock(&arena_lock);
+                arena[s->head.y][s->head.x + 1] = 0; 
+                pthread_mutex_unlock(&arena_lock);
+            }
+            break;
+        }
+        case LEFT:{
+            s->head.x = s->head.x-1; 
+            s->head.d = LEFT; 
+            break;
+        }
+        case RIGHT:{
+            s->head.x = s->head.x+1; 
+            s->head.d = RIGHT; 
+            break; 
+        }
+        default: break; 
+    }
+
+    pthread_mutex_lock(&arena_lock);
+    arena[s->head.y][s->head.x] = -(s->player_id);
+    arena[s->body[0].y][s->body[0].x] = s->player_id; 
+    pthread_mutex_lock(&arena_lock);
+    s->length++;
+    add_fruit(); 
 }
 
+/**
+ * @brief Function to generate a thread 
+ * https://docs.oracle.com/cd/E19455-01/806-5257/attrib-69011/index.html
+ * @param fn 
+ * @param arg 
+ * @return int 
+ */
+int generate_thread(void* (*fn)(void *), void *arg){
+    int err; 
+    pthread_t tid; 
+    pthread_attr_t attr; 
+
+    err = pthread_attr_init(&attr);
+    if(err != 0)
+        return err; 
+    err = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    if(err == 0)
+        err = pthread_create(&tid, &attr, fn, arg);
+    pthread_attr_destroy(&attr); 
+    return err; 
+}
+
+/**
+ * @brief Error output 
+ * 
+ * @param err error message to display 
+ */
+void error_output(const char* err){
+    perror(err); 
+    // flush the stream 
+    fflush(stdout); 
+    exit(1); 
+}
+
+/**
+ * @brief Function to destroy the server 
+ * 
+ */
+void exit_handler(){
+    printf("Exiting Server, RIP.\n");
+    exit(0);
+}
+
+/**
+ * @brief a thread of gameplay
+ * 
+ * @param arg arguments 
+ * @return void* Pointer to a gameplay 
+ */
+void* game(void *arg){
+    int fd = *(int*) arg; 
+    int player_id = fd-3; 
+    printf("Entered player_id: %d\n", player_id);
+
+    int head_y, head_x; 
+    srand(time(NULL)); 
+    do{
+        head_y = rand() % (ARENA_HEIGHT - 6) + 3;
+        head_x = rand() % (ARENA_WIDTH - 6) + 3;     
+    } while(!(
+        ((arena[head_y][head_x] == arena[head_y+1][head_x])
+        == arena[head_y+2][head_x]) == 0));
+
+    snake *player = snake_init(player_id, head_y, head_x);
+
+    char key = UP; 
+    char key_buff; 
+    char arena_buf[arena_size];
+    int bytes_sent, n; 
+    int success = 1; 
+
+    while(success){
+        if(won)
+            success = 0; 
+        
+        if(player->length >= 15){
+            won = player_id; 
+            pthread_mutex_lock(&arena_lock);
+            arena[0][0] = WINNER; 
+            pthread_mutex_unlock(&arena_lock);
+        } else if(arena[0][0] != BORDER) {
+            pthread_mutex_lock(&arena_lock); 
+            arena[0][0] = won; 
+            pthread_mutex_unlock(&arena_lock);
+        }
+
+        memcpy(arena_buf, arena, arena_size);
+        bytes_sent = 0; 
+        while(bytes_sent < arena_size){
+            bytes_sent += write(fd, arena, arena_size);
+            if(bytes_sent < 0) error_output("ERROR writing to socket");
+        }
+
+        bzero(&key_buff, 1); 
+        n = read(fd, &key_buff, 1);
+        if (n <= 0)
+            break; 
+        
+        key_buff = toupper(key_buff); 
+        if( ((key_buff == UP) && !(player->head.d == DOWN))
+            ||((key_buff == DOWN) && !(player->head.d == UP))
+            ||((key_buff == LEFT) && !(player->head.d == RIGHT))
+            ||((key_buff == RIGHT) && !(player->head.d == LEFT)))
+            key = key_buff; 
+
+        switch(key){
+            case UP:{
+                if((arena[player->head.y-1][player->head.x] == 0) &&
+                    !(arena[player->head.y-1][player->head.x+1] == FRUIT)){
+                        snake_move(player, UP); 
+                        printf("Player %d moved 1 up\n", player_id); 
+                }
+                else if((arena[player->head.y-1][player->head.x] == FRUIT) ||
+                    (arena[player->head.y-1][player->head.x+1] == FRUIT)){
+                        consume_fruit(player, UP); 
+                        printf("%d ate fruit\n", player_id);
+                }
+                else{
+                    snake_move(player, LEFT); 
+                    success = 0; 
+                }
+                break; 
+            }
+
+            case DOWN:{
+                if((arena[player->head.y+1][player->head.x] == 0) &&
+                    !(arena[player->head.y+1][player->head.x+1] == FRUIT)){
+                        snake_move(player, DOWN); 
+                        printf("Player %d moved 1 down\n", player_id); 
+                }
+                else if((arena[player->head.y+1][player->head.x] == FRUIT) ||
+                    (arena[player->head.y+1][player->head.x+1] == FRUIT)){
+                        consume_fruit(player, DOWN); 
+                        printf("%d ate fruit\n", player_id);
+                }
+                else{
+                    snake_move(player, DOWN); 
+                    success = 0; 
+                }
+                break;
+            }
+
+            case RIGHT:{
+                if(arena[player->head.y][player->head.x+1] == 0){
+                    snake_move(player, RIGHT); 
+                    printf("Player %d moved Right\n", player_id);
+                }
+                else if(arena[player->head.y][player->head.x+1] == FRUIT){
+                    consume_fruit(player, RIGHT); 
+                    printf("Player %d ate fruit\n", player_id);
+                }
+                else{
+                    snake_move(player, RIGHT);
+                    success = 0; 
+                }
+                break; 
+            }
+
+            case LEFT:{
+                if(arena[player->head.y][player->head.x-1] == 0) {
+                    snake_move(player, LEFT); 
+                    printf("Player %d moved left\n", player_id);
+                }
+                else if(arena[player->head.y][player->head.x-1] == FRUIT) {
+                    consume_fruit(player, LEFT);
+                    printf("Played %d ate fruit\n", player_id);
+                }
+                else {
+                    snake_move(player, LEFT); 
+                    success = 0; 
+                }
+                break;
+            }
+
+            default: break; 
+        }   
+    }
+
+    if(player->length == KING_SNAKE_LEN){
+        fprintf(stderr, "Player %d won\n", player_id);
+        kill_snake(player); 
+        close(fd); 
+        return 0; 
+    } else {
+        fprintf(stderr, "Player %d left the game\n.", player_id);
+        kill_snake(player); 
+        close(fd); 
+        return 0; 
+    }
+}
+
+// Main function 
 int main( int argc, char *argv[] )
 {
     // Declare variables

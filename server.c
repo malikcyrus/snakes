@@ -448,73 +448,66 @@ void* game(void *arg){
 // Main function 
 int main( int argc, char *argv[] )
 {
-    // Declare variables
-    int sockfd, newsockfd, portno, clilen;
-    char buffer[256];
-    struct sockaddr_in serv_addr, cli_addr;
-    int  n;
+    int     socket_fds[MAX_PLAYERS]; 
+    struct sockaddr_in socket_addr[MAX_PLAYERS];
+    int     i; 
 
-    // Create server socket (AF_INET, SOCK_STREAM)
-    if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-    {
-        perror("ERROR opening socket");
-        exit(1);
+    // Exit handler  
+    signal(SIGINT, exit_handler); 
+
+    memset(arena, 0, arena_size); 
+
+    for(int i = 0; i < ARENA_HEIGHT; i++){
+        arena[i][0] = arena[i][ARENA_WIDTH - 2] = BORDER; 
     }
 
-    // Initialize socket structure
-    memset(&serv_addr, 0, sizeof(serv_addr));
-    portno = 5001;  // Server port
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY); // Accept connections from any address
-    serv_addr.sin_port = htons(portno);
- 
-    // Bind the host address
-    if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0)
-    {
-         perror("ERROR on binding");
-		 close(sockfd);
-         exit(-1);
+    for(int i = 0; i < ARENA_WIDTH; i++) {
+        arena[0][i] = arena[ARENA_HEIGHT - 1][i] = BORDER; 
     }
 
-    // Start listening for the clients
-    if (listen(sockfd, 5) < 0) {
-        perror("ERROR on listening\n");
-        close(sockfd);
-        exit(-1);
-    }
-    clilen = sizeof(cli_addr);
-
-    // Accept actual connection from the client
-    newsockfd = accept(sockfd, (struct sockaddr *)&cli_addr, &clilen);
-    if (newsockfd < 0) 
-    {
-        perror("ERROR on accept");
-		close(sockfd);
-        exit(-1);
+    // adding fruit randomly 
+    for(int i = 0; i < 3; i++){
+        add_fruit(); 
     }
 
-    // If connection is established then start communicating 
-    memset(buffer, 0, 256);
-    if ((n = read(newsockfd, buffer, 255 )) < 0)
-    {
-        perror("ERROR reading from socket");
-		close(sockfd);
-		close(newsockfd);
-        exit(1);
-    }
-    printf("Here is the message: %s",buffer);
-
-    // Write a response to the client
-    if ((n = write(newsockfd, "I got your message", 18)) < 0)
-    {
-        perror("ERROR writing to socket");
-		close(newsockfd);
-		close(sockfd);
-        exit(1);
+    // Creating server socket 
+    socket_fds[0] socket(AF_INET, SOCK_STREAM, 0); 
+    if (socket_fds[0] < 0) {
+        error_output("ERROR Opening socket");
     }
 
-    // All done, close sockets
-    close(newsockfd);
-    close(sockfd);
-    exit(0);
+    bzero((char *) &socket_addr[0], sizeof(socket_addr[0])); 
+    socket_addr[0].sin_family = AF_INET; 
+    socket_addr[0].sin_addr.s_addr = INADDR_ANY; 
+
+    //Converting unsigned short integer from host byte order to network byte order. 
+    socket_addr[0].sin_port = htons(PORT); 
+
+    // assigning address specified by address to the socket referred by the server socket fd 
+    if (bind(socket_fds[0], (struct sockaddr *) &socket_addr[0], sizeof(socket_addr[0])) < 0) {
+        error_output("ERROR on binding");
+    }
+
+    // Listener for requests 
+    listen(socket_fds[0], 5); 
+    socklen_t clilen = sizeof(socket_addr[0]); 
+
+    for(int i = 1; i++) { 
+        // accept an incoming request 
+        socket_fds[i] = accept(socket_fds[0], (struct sockaddr *) &socket_addr[i], &clilen); 
+        if (socket_fds[i] < 0) {
+            error_output("Error accepting request"); 
+        }
+
+        // reset 
+        if(won){
+            printf("Restarting game\n");
+            won = 0; 
+        }
+
+        generate_thread(&game, &socket_fds[i]);
+    }
+
+    close(socket_fds[0]); 
+    return 0; 
 }

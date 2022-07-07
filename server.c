@@ -12,7 +12,7 @@
 
 #define PORT                5100 
 #define MAX_PLAYERS         1000
-#define ARENA_HEIGHT        24
+#define ARENA_HEIGHT        30
 #define ARENA_WIDTH         80
 #define MAX_SNAKE_LEN       ARENA_HEIGHT * ARENA_WIDTH
 #define BEGIN_SNAKE_LEN     3
@@ -39,7 +39,7 @@ typedef enum{
     RIGHT = RIGHT_KEY
 } direction; 
 
-// Point on map
+// Point in array
 typedef struct{
     int x, y; 
     direction d; 
@@ -49,7 +49,7 @@ typedef struct{
 typedef struct{
     int player_id, length; 
     coordinate head; 
-    coordinate body[MAX_SNAKE_LEN -2];
+    coordinate body[MAX_SNAKE_LEN - 2];
     coordinate tail; 
 } snake;
 
@@ -85,7 +85,7 @@ snake* snake_init(int player_id, int head_y, int head_x){
     s->head.d = UP; // initial direction 
 
     s->body[0].y = head_y + 1; 
-    s->body[0].x = head_x + 1; 
+    s->body[0].x = head_x; 
     s->body[0].d = UP; 
 
     s->tail.y = head_y + 2; 
@@ -105,7 +105,7 @@ void kill_snake(snake *s){
 
     // set arena coordinates to 0 
     arena[s->head.y][s->head.x] = 
-    arena[s->tail.y][s->tail.y] = 0; 
+    arena[s->tail.y][s->tail.x] = 0; 
     
     // delete body of snake 
     for(int i = 0; i < s->length - 2; i++)
@@ -177,21 +177,13 @@ void snake_move(snake *s, direction d) {
  * 
  */
 void add_fruit(){
-    int x, y; 
-
-    // generate random coordinates to add fruit to 
+    int x, y;
     do{
-        y = rand() % (ARENA_HEIGHT - 6) + 3; 
-        x = rand() % (ARENA_WIDTH - 6) + 3; 
-    } while (arena[x][y] != 0);
-
-    // lock mutex 
+        y = rand() % (ARENA_HEIGHT - 5) + 4;
+        x = rand() % (ARENA_WIDTH - 6) + 3;
+    } while (arena[y][x] != 0);
     pthread_mutex_lock(&arena_lock);
-
-    // set coordinate to show fruit at 
-    arena[y][x] = FRUIT; 
-
-    // unlock mutex 
+    arena[y][x] = FRUIT;
     pthread_mutex_unlock(&arena_lock);
 }
 
@@ -202,17 +194,17 @@ void add_fruit(){
  * @param d Direction the snake was moving in 
  */
 void consume_fruit(snake* s, direction d){
-    // move snake 
+    // cut secondary part of body to primary 
     memmove(&(s->body[1]), &(s->body[0]), 
             (s->length-2) * sizeof(coordinate));
 
-    // set properties 
+    // set the primary part of the body to the head 
     s->body[0].y = s->head.y; 
     s->body[0].x = s->head.x; 
     s->body[0].d = s->head.d; 
 
-    // move snake in direction 
-     switch(d){
+    // Direction snake is moving in 
+    switch(d){
         case UP:{
             s->head.y = s->head.y-1; 
             s->head.d = UP; 
@@ -249,7 +241,7 @@ void consume_fruit(snake* s, direction d){
     pthread_mutex_lock(&arena_lock);
     arena[s->head.y][s->head.x] = -(s->player_id);
     arena[s->body[0].y][s->body[0].x] = s->player_id; 
-    pthread_mutex_lock(&arena_lock);
+    pthread_mutex_unlock(&arena_lock);
     s->length++;
     add_fruit(); 
 }
@@ -262,8 +254,11 @@ void consume_fruit(snake* s, direction d){
  * @return int 
  */
 int generate_thread(void* (*fn)(void *), void *arg){
+    // thread/ error 
     int err; 
+    // thread id 
     pthread_t tid; 
+    // thread attribute
     pthread_attr_t attr; 
 
     err = pthread_attr_init(&attr);
@@ -293,7 +288,7 @@ void error_output(const char* err){
  * 
  */
 void exit_handler(){
-    printf("Exiting Server, RIP.\n");
+    printf("\nExiting Server, RIP.\n");
     exit(0);
 }
 
@@ -304,21 +299,27 @@ void exit_handler(){
  * @return void* Pointer to a gameplay 
  */
 void* game(void *arg){
+    // file descriptors 
     int fd = *(int*) arg; 
-    int player_id = fd-3; 
-    printf("Entered player_id: %d\n", player_id);
 
+    // no. of players from file descriptors 
+    int player_id = fd-3; 
+    printf("Player_id: %d has entered\n", player_id);
+
+    // searching for 3 consecutive 0s to insert snake 
     int head_y, head_x; 
-    srand(time(NULL)); 
+    srand(time(NULL));  // seed ranom number generator 
     do{
         head_y = rand() % (ARENA_HEIGHT - 6) + 3;
         head_x = rand() % (ARENA_WIDTH - 6) + 3;     
-    } while(!(
-        ((arena[head_y][head_x] == arena[head_y+1][head_x])
-        == arena[head_y+2][head_x]) == 0));
+    } while (!(
+        ((arena[head_y][head_x] == arena[head_y+1][head_x]) 
+            == arena[head_y+2][head_x]) == 0));
 
+    // initialise a snake 
     snake *player = snake_init(player_id, head_y, head_x);
 
+    // variables for input 
     char key = UP; 
     char key_buff; 
     char arena_buf[arena_size];
@@ -326,32 +327,40 @@ void* game(void *arg){
     int success = 1; 
 
     while(success){
+        // if there is a winner 
         if(won)
             success = 0; 
         
+        // if player with id X is the winner 
         if(player->length >= 15){
+            // set won to player id 
             won = player_id; 
+            // set arena coordiantes to WINNER 
             pthread_mutex_lock(&arena_lock);
             arena[0][0] = WINNER; 
             pthread_mutex_unlock(&arena_lock);
-        } else if(arena[0][0] != BORDER) {
+        } else if(arena[0][0] != BORDER) { // if not border 
             pthread_mutex_lock(&arena_lock); 
             arena[0][0] = won; 
             pthread_mutex_unlock(&arena_lock);
         }
 
-        memcpy(arena_buf, arena, arena_size);
+        // sending data to client 
+        memcpy(arena_buf, arena, arena_size); // copy data to send 
         bytes_sent = 0; 
         while(bytes_sent < arena_size){
             bytes_sent += write(fd, arena, arena_size);
+            // error if no bytes are sent 
             if(bytes_sent < 0) error_output("ERROR writing to socket");
         }
 
+        // player key input 
         bzero(&key_buff, 1); 
         n = read(fd, &key_buff, 1);
         if (n <= 0)
             break; 
         
+        // if w, a, s, or d is pressed 
         key_buff = toupper(key_buff); 
         if( ((key_buff == UP) && !(player->head.d == DOWN))
             ||((key_buff == DOWN) && !(player->head.d == UP))
@@ -359,19 +368,22 @@ void* game(void *arg){
             ||((key_buff == RIGHT) && !(player->head.d == LEFT)))
             key = key_buff; 
 
+        // relevant action on pressed key 
         switch(key){
             case UP:{
+                // if player moves UP and fruit is not eaten 
                 if((arena[player->head.y-1][player->head.x] == 0) &&
                     !(arena[player->head.y-1][player->head.x+1] == FRUIT)){
                         snake_move(player, UP); 
                         printf("Player %d moved 1 up\n", player_id); 
                 }
+                // consumed fruit 
                 else if((arena[player->head.y-1][player->head.x] == FRUIT) ||
                     (arena[player->head.y-1][player->head.x+1] == FRUIT)){
                         consume_fruit(player, UP); 
-                        printf("%d ate fruit\n", player_id);
+                        printf("Player_id-%d ate fruit\n", player_id);
                 }
-                else{
+                else{ // else continue moving snake in left 
                     snake_move(player, LEFT); 
                     success = 0; 
                 }
@@ -379,17 +391,19 @@ void* game(void *arg){
             }
 
             case DOWN:{
+                // if player moves down and fruit is not consumed 
                 if((arena[player->head.y+1][player->head.x] == 0) &&
                     !(arena[player->head.y+1][player->head.x+1] == FRUIT)){
                         snake_move(player, DOWN); 
                         printf("Player %d moved 1 down\n", player_id); 
                 }
+                // if fruit is consumed
                 else if((arena[player->head.y+1][player->head.x] == FRUIT) ||
                     (arena[player->head.y+1][player->head.x+1] == FRUIT)){
-                        consume_fruit(player, DOWN); 
-                        printf("%d ate fruit\n", player_id);
+                    consume_fruit(player, DOWN); 
+                    printf("%d ate fruit\n", player_id);
                 }
-                else{
+                else{ // else continue moving down 
                     snake_move(player, DOWN); 
                     success = 0; 
                 }
@@ -397,10 +411,12 @@ void* game(void *arg){
             }
 
             case RIGHT:{
+                // if fruit isn't consumed 
                 if(arena[player->head.y][player->head.x+1] == 0){
                     snake_move(player, RIGHT); 
                     printf("Player %d moved Right\n", player_id);
                 }
+                // fruit consumed 
                 else if(arena[player->head.y][player->head.x+1] == FRUIT){
                     consume_fruit(player, RIGHT); 
                     printf("Player %d ate fruit\n", player_id);
@@ -413,10 +429,11 @@ void* game(void *arg){
             }
 
             case LEFT:{
+                // if fruit is not consumed 
                 if(arena[player->head.y][player->head.x-1] == 0) {
                     snake_move(player, LEFT); 
                     printf("Player %d moved left\n", player_id);
-                }
+                } // if fruit is consumed 
                 else if(arena[player->head.y][player->head.x-1] == FRUIT) {
                     consume_fruit(player, LEFT);
                     printf("Played %d ate fruit\n", player_id);
@@ -450,7 +467,6 @@ int main( int argc, char *argv[] )
 {
     int     socket_fds[MAX_PLAYERS]; 
     struct sockaddr_in socket_addr[MAX_PLAYERS];
-    int     i; 
 
     // Exit handler  
     signal(SIGINT, exit_handler); 
@@ -466,16 +482,18 @@ int main( int argc, char *argv[] )
     }
 
     // adding fruit randomly 
-    for(int i = 0; i < 3; i++){
+    srand(time(NULL)); 
+    for(int i = 0; i < 5; i++){
         add_fruit(); 
     }
 
     // Creating server socket 
-    socket_fds[0] socket(AF_INET, SOCK_STREAM, 0); 
+    socket_fds[0] = socket(AF_INET, SOCK_STREAM, 0); 
     if (socket_fds[0] < 0) {
         error_output("ERROR Opening socket");
     }
-
+    
+    // set socket address to 0 and set attributes 
     bzero((char *) &socket_addr[0], sizeof(socket_addr[0])); 
     socket_addr[0].sin_family = AF_INET; 
     socket_addr[0].sin_addr.s_addr = INADDR_ANY; 
@@ -492,14 +510,14 @@ int main( int argc, char *argv[] )
     listen(socket_fds[0], 5); 
     socklen_t clilen = sizeof(socket_addr[0]); 
 
-    for(int i = 1; i++) { 
+    for(int i = 1;; i++) { 
         // accept an incoming request 
         socket_fds[i] = accept(socket_fds[0], (struct sockaddr *) &socket_addr[i], &clilen); 
         if (socket_fds[i] < 0) {
             error_output("Error accepting request"); 
         }
 
-        // reset 
+        // reset game if there is a winner 
         if(won){
             printf("Restarting game\n");
             won = 0; 

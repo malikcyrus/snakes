@@ -12,12 +12,12 @@
 #include <netdb.h> 
 
 #define PORT                5100 
-#define ARENA_HEIGHT        24
+#define ARENA_HEIGHT        30
 #define ARENA_WIDTH         80
 #define FRUIT               -1000
 #define BORDER              -99
 #define WINNER              -94
-#define REFRESH             0.15
+#define REFRESH_PER_S        0.15
 #define ONGOING             -34
 #define INTERRUPTED         -30
 #define UP_KEY              'W'
@@ -39,6 +39,13 @@ void error_output(const char* err){
     exit(0); 
 }
 
+/**
+ * @brief Function to generate a thread 
+ * 
+ * @param fn execution 
+ * @param arg arguments 
+ * @return int thread/ error 
+ */
 int generate_thread(void* (*fn)(void *), void* arg){
     int err; 
     pthread_t tid; 
@@ -54,11 +61,17 @@ int generate_thread(void* (*fn)(void *), void* arg){
     return err;
 }
 
+/**
+ * @brief Function to send data to server 
+ * 
+ * @param arg socket file descriptors 
+ * @return void* pointer to indicate success 
+ */
 void* send_to_server(void* arg){
     int sockfd = *(int *) arg; 
     struct timespec ts; 
-    ts.tv_sec = REFRESH; 
-    ts.tv_nsec = ((int)(REFRESH * 1000) % 1000) * 1000000; 
+    ts.tv_sec = REFRESH_PER_S; 
+    ts.tv_nsec = ((int)(REFRESH_PER_S * 1000) % 1000) * 1000000; 
     while(game_output == ONGOING){
         nanosleep(&ts, NULL); 
         int n = write(sockfd, &key, 1); 
@@ -68,6 +81,12 @@ void* send_to_server(void* arg){
     return 0; 
 }
 
+/**
+ * @brief Function to refresh screen 
+ * 
+ * @param arg socket file descriptors 
+ * @return void* pointer 
+ */
 void* refresh_display(void* arg){
     int sockfd = *(int*) arg; 
     int bytes_read; 
@@ -78,7 +97,7 @@ void* refresh_display(void* arg){
     
     while(game_output == ONGOING){
         bytes_read = 0; 
-        bzero(arena, arena_size);
+        bzero(arena_buf, arena_size);
         while(bytes_read < arena_size){
             n = read(sockfd, arena_buf + bytes_read, arena_size - bytes_read);
             if(n <= 0) {
@@ -90,12 +109,12 @@ void* refresh_display(void* arg){
         memcpy(arena, arena_buf, arena_size); 
 
         clear(); 
-        box(window, '+', '+');
+        box(window, '-', '|');
         refresh(); 
         wrefresh(window); 
 
         for(int i = 1; i < ARENA_HEIGHT-1; i++){
-            for(int j = 1; j < ARENA_WIDTH - 1; i++){
+            for(int j = 1; j < ARENA_WIDTH - 1; j++){
                 int index = arena[i][j]; 
                 int color = abs(index) % 7; 
                 attron(COLOR_PAIR(color));
@@ -105,18 +124,18 @@ void* refresh_display(void* arg){
                 }
                 else if ((index < 0) && (index != FRUIT)){
                     if(arena[i-1][j] == -index)
-                        mvprintw(i, j, "..");
+                        mvprintw(i, j, "vv");
                     else if(arena[i+1][j] == -index)
-                        mvprintw(i, j, "**");
+                        mvprintw(i, j, "^^");
                     else if(arena[i][j-1] == -index)
-                        mvprint(i, j, " :"); 
+                        mvprintw(i, j, " :"); 
                     else if(arena[i][j+1] == -index)
                         mvprintw(i, j, ": ");
                     attroff(COLOR_PAIR(color));
                 }
                 else if (index == FRUIT){
                     attroff(COLOR_PAIR(color));
-                    mvprintw(i, j, "o");
+                    mvprintw(i, j, "X");
                 }
             }
         }
@@ -203,7 +222,7 @@ int main(int argc, char *argv[])
     while(game_output == ONGOING){
 
         bzero(&key_buf, 1); 
-        timeout(REFRESH * 1000); 
+        timeout(REFRESH_PER_S * 1000); 
         key_buf = getch(); 
         key_buf = toupper(key_buf); 
         if (key_buf == '.'){
@@ -216,26 +235,26 @@ int main(int argc, char *argv[])
             key = key_buf; 
     }
     // Display winner
-    WINDOW* announcement = newwin(7, 35, (ARENA_HEIGHT - 7)/2, (ARENA_WIDTH - 35)/2);
-    box(announcement, 0, 0);
+    WINDOW* alert = newwin(7, 35, (ARENA_HEIGHT - 7)/2, (ARENA_WIDTH - 35)/2);
+    box(alert, 0, 0);
     if (game_output == WINNER){
-        mvwaddstr(announcement, 2, (35-21)/2, "GAME OVER! - You WIN!");
-        mvwaddstr(announcement, 4, (35-21)/2, "Press any key to quit.");
-        wbkgd(announcement, COLOR_PAIR(2));
+        mvwaddstr(alert, 2, (35-21)/2, "GAME OVER! - You WIN!");
+        mvwaddstr(alert, 4, (35-21)/2, "Press any key to quit.");
+        wbkgd(alert, COLOR_PAIR(2));
     } else {
-        mvwaddstr(announcement, 2, (35-21)/2, "Game over - you lose!");
+        mvwaddstr(alert, 2, (35-21)/2, "Game over - you lose!");
         if(game_output > 0){
-            mvwprintw(announcement, 3, (35-13)/2, "Player %d won.", game_output);    
+            mvwprintw(alert, 3, (35-13)/2, "Player %d won.", game_output);    
         }
-        mvwaddstr(announcement, 4, (35-21)/2, "Press any key to quit.");
-        wbkgd(announcement, COLOR_PAIR(1)); 
+        mvwaddstr(alert, 4, (35-21)/2, "Press any key to quit.");
+        wbkgd(alert, COLOR_PAIR(1)); 
     }
-    mvwin(announcement, (ARENA_HEIGHT - 7)/2, (ARENA_WIDTH - 35)/2);
-    wnoutrefresh(announcement); 
-    wrefresh(announcement); 
+    mvwin(alert, (ARENA_HEIGHT - 7)/2, (ARENA_WIDTH - 35)/2);
+    wnoutrefresh(alert); 
+    wrefresh(alert); 
     sleep(2); 
-    wgetch(announcement); 
-    delwin(announcement);
+    wgetch(alert); 
+    delwin(alert);
     wclear(window); 
 
     echo();

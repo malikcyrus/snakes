@@ -148,27 +148,33 @@ void* refresh_display(void* arg){
 
 int main(int argc, char *argv[])
 {
+    // initialising variables for sockets 
     int sockfd; 
     struct sockaddr_in serv_addr; 
     struct hostent* server; 
     char key_buf; 
 
-    if (argc < 2){
-        fprintf(stderr, "Please type:\n\t %s [server ip]\n to launch the game.\n", argv[0]); 
+    if (argc < 2){ // checking arguments 
+        fprintf(stderr, "Please type:\n\t %s <server ip>\n to launch the game.\n", argv[0]); 
         exit(0);
     }
 
+    // Open socket 
     sockfd = socket(AF_INET, SOCK_STREAM, 0); 
     if (sockfd < 0) 
         error_output("ERROR opening socket");
     
+    // Get server 
     server = gethostbyname(argv[1]);
     if (server == NULL){
         fprintf(stderr, "ERROR, no such host exits.\n");
         exit(0); 
     }
 
+    // clear data
     bzero((char *) &serv_addr, sizeof(serv_addr));
+
+    // set properties 
     serv_addr.sin_family = AF_INET; 
     bcopy((char *) server->h_addr, 
         (char *) &serv_addr.sin_addr.s_addr, 
@@ -176,6 +182,7 @@ int main(int argc, char *argv[])
     
     serv_addr.sin_port = htons(PORT); 
 
+    // connect to server 
     if (connect(sockfd, (struct sockaddr * ) &serv_addr, sizeof(serv_addr)) < 0)
         error_output("ERROR connecting");
 
@@ -189,7 +196,7 @@ int main(int argc, char *argv[])
 
     window = newwin(ARENA_HEIGHT, ARENA_WIDTH, 0, 0); 
 
-    // snake colors 
+    // Initialise snake colors 
     init_pair(0, COLOR_WHITE, COLOR_BLUE);
     init_pair(1, COLOR_WHITE, COLOR_RED);
     init_pair(2, COLOR_WHITE, COLOR_GREEN);
@@ -216,6 +223,7 @@ int main(int argc, char *argv[])
     mvprintw((ARENA_HEIGHT-20)/2 + 19, (ARENA_WIDTH-58)/2,"Press any key to start . . ."); 
     getch();
 
+    // generate threads 
     generate_thread(refresh_display, &sockfd);
     generate_thread(send_to_server, &sockfd);
 
@@ -223,17 +231,19 @@ int main(int argc, char *argv[])
 
         bzero(&key_buf, 1); 
         timeout(REFRESH_PER_S * 1000); 
-        key_buf = getch(); 
+        key_buf = getch(); // pause output until a key is pressed 
         key_buf = toupper(key_buf); 
-        if (key_buf == '.'){
+        if (key_buf == '.'){ // quit 
             game_output = INTERRUPTED; 
             break; 
-        } else if((key_buf == UP_KEY)
+        } // key pressed 
+        else if((key_buf == UP_KEY) 
                 || (key_buf == DOWN_KEY)
                 || (key_buf == LEFT_KEY)
                 || (key_buf == RIGHT_KEY))
             key = key_buf; 
     }
+
     // Display winner
     WINDOW* alert = newwin(7, 35, (ARENA_HEIGHT - 7)/2, (ARENA_WIDTH - 35)/2);
     box(alert, 0, 0);
@@ -241,7 +251,7 @@ int main(int argc, char *argv[])
         mvwaddstr(alert, 2, (35-21)/2, "GAME OVER! - You WIN!");
         mvwaddstr(alert, 4, (35-21)/2, "Press any key to quit.");
         wbkgd(alert, COLOR_PAIR(2));
-    } else {
+    } else { // lost 
         mvwaddstr(alert, 2, (35-21)/2, "Game over - you lose!");
         if(game_output > 0){
             mvwprintw(alert, 3, (35-13)/2, "Player %d won.", game_output);    
@@ -249,18 +259,21 @@ int main(int argc, char *argv[])
         mvwaddstr(alert, 4, (35-21)/2, "Press any key to quit.");
         wbkgd(alert, COLOR_PAIR(1)); 
     }
+    
+    // perform any clean up required 
     mvwin(alert, (ARENA_HEIGHT - 7)/2, (ARENA_WIDTH - 35)/2);
-    wnoutrefresh(alert); 
+    wnoutrefresh(alert); // copy to virtual screen 
     wrefresh(alert); 
-    sleep(2); 
+    sleep(2); // wait 
     wgetch(alert); 
     delwin(alert);
-    wclear(window); 
+    wclear(window); // clear window
 
-    echo();
-    curs_set(1); 
-    endwin(); 
+    echo(); // echo any characters to the screen 
+    curs_set(1); // set cursor to normal mode 
+    endwin(); // restore terminal 
 
+    // close socket 
     close(sockfd); 
     return 0; 
 } 
